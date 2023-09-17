@@ -2,16 +2,7 @@ package unique
 
 import (
 	"context"
-	"expert-go/pkg/interchange/metadata"
-	"expert-go/pkg/runtime/event"
 	"sync/atomic"
-)
-
-const (
-	EventKey   event.Key = "Key"
-	EventEach  event.Key = "Each"
-	EventExist event.Key = "Exist"
-	EventClose event.Key = "Close"
 )
 
 type Key string
@@ -27,14 +18,10 @@ type SharedKey struct {
 
 	closed     atomic.Bool
 	readCloser bool
-
-	events *event.Handler
 }
 
 func NewSharedKey(readCloser bool) *SharedKey {
-	key := &SharedKey{readCloser: readCloser}
-
-	return key.initEventsHandler()
+	return &SharedKey{readCloser: readCloser}
 }
 
 func (key *SharedKey) String() string { return key.Key().String() }
@@ -50,14 +37,19 @@ func (key *SharedKey) Add(shard Key) *SharedKey {
 }
 
 func (key *SharedKey) Key() (k Key) {
-	key.events.Emit(EventKey, nil)
+	if !key.closed.Load() && key.readCloser {
+		key.closed.Store(true)
+	}
+
 	key.Each(func(shard Key) { k += shard })
 
 	return k
 }
 
 func (key *SharedKey) Each(fn func(Key)) *SharedKey {
-	key.events.Emit(EventEach, nil)
+	if !key.closed.Load() && key.readCloser {
+		key.closed.Store(true)
+	}
 
 	for _, shard := range key.key {
 		fn(shard)
@@ -67,7 +59,9 @@ func (key *SharedKey) Each(fn func(Key)) *SharedKey {
 }
 
 func (key *SharedKey) Exist(shard Key) (exist bool) {
-	key.events.Emit(EventExist, nil)
+	if !key.closed.Load() && key.readCloser {
+		key.closed.Store(true)
+	}
 
 	key.Each(func(key Key) {
 		if key == shard {
@@ -79,22 +73,9 @@ func (key *SharedKey) Exist(shard Key) (exist bool) {
 }
 
 func (key *SharedKey) Close() *SharedKey {
-	key.events.Emit(EventClose, nil)
-
-	return key
-}
-
-func (key *SharedKey) initEventsHandler() *SharedKey {
-	handler := event.NewHandler()
-
-	closeGroup := event.NewGroup(EventClose, EventKey, EventEach, EventExist)
-	handler.OnGroup(closeGroup, func(*metadata.Metadata) {
-		if !key.closed.Load() && key.readCloser {
-			key.closed.Store(true)
-		}
-	})
-
-	key.events = handler
+	if !key.closed.Load() && key.readCloser {
+		key.closed.Store(true)
+	}
 
 	return key
 }
